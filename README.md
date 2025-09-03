@@ -17,6 +17,10 @@ I'm Thaariq Prasetia. A Web Developer from Malang, Indonesia.
 </p> -->
 
 <p align="center">
-  <img src="https://github-readme-stats.vercel.app/api?username=MasThor&show_icons=true&theme=gotham" alt="MasThor" />&nbsp;
-  <img src="https://github-readme-stats.vercel.app/api/top-langs/?username=MasThor&layout=compact&theme=gotham" alt="top lang" />
+    <a href="https://github.com/MasThor">
+        <img src="https://github-readme-stats.vercel.app/api?username=MasThor&show_icons=true&theme=gotham" alt="MasThor" />&nbsp;
+    </a>
+    <a href="https://github.com/MasThor">
+        <img src="https://github-readme-stats.vercel.app/api/top-langs/?username=MasThor&layout=compact&theme=gotham" alt="top lang" />
+    </a>
 </p>
