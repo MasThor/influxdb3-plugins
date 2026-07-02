@@ -1,19 +1,19 @@
 # InfluxDB 3 Custom Image with Auto Plugin Registration
 
-Custom Docker image berbasis `influxdb:3.10-core` dengan plugin Processing Engine ter-bake langsung ke dalam image, plus sidecar service untuk auto-register trigger saat startup.
+Custom Docker image based on `influxdb:3.10-core` with Processing Engine plugins baked directly into the image, plus a sidecar service to auto-register triggers upon startup.
 
 ---
 
-## Struktur Folder
+## Folder Structure
 
 ```
 influxdb3-plugins/
 ├── Dockerfile                          ← Build custom image
-├── docker-compose.yml                  ← Orkestrasi: InfluxDB + Init sidecar
-├── .env.example                        ← Template environment variables
+├── docker-compose.yml                  ← Orchestration: InfluxDB + Init sidecar
+├── .env.example                        ← Environment variables template
 │
 ├── config/
-│   └── admin-token.json               ← Static admin token (di-mount :ro)
+│   └── admin-token.json               ← Static admin token (mounted :ro)
 │
 ├── init/
 │   └── install_plugins.sh             ← Sidecar: auto-register plugin triggers
@@ -27,37 +27,37 @@ influxdb3-plugins/
 
 ## Quick Start
 
-### 1. Setup environment
+### 1. Setup Environment
 
 ```bash
 cp .env.example .env
-# Edit .env jika perlu mengubah port atau token
+# Edit .env if you need to change ports or the token
 ```
 
-### 2. Build & jalankan
+### 2. Build & Run
 
 ```bash
 docker compose up -d --build
 ```
 
-### 3. Cek log installer
+### 3. Check Installer Logs
 
 ```bash
-# Lihat proses auto-register plugin
+# Check the auto-registration process
 docker compose logs -f influxdb-init
 
-# Lihat InfluxDB berjalan
+# Verify InfluxDB status
 docker compose logs -f influxdb
 ```
 
-### 4. Verifikasi trigger terpasang
+### 4. Verify Triggers are Registered
 
 ```bash
-# Cek trigger di database energy_minutes
+# Check triggers in the energy_minutes database
 curl -s -H "Authorization: Bearer $(cat config/admin-token.json | python3 -c "import sys,json; print(json.load(sys.stdin)['token'])")" \
   http://localhost:8086/api/v3/configure/trigger?db=energy_minutes
 
-# Atau via CLI di dalam container
+# Or via CLI inside the container
 docker exec influxdb3 influxdb3 query \
   --token $(cat config/admin-token.json | python3 -c "import sys,json; print(json.load(sys.stdin)['token'])") \
   --database energy_minutes \
@@ -66,69 +66,69 @@ docker exec influxdb3 influxdb3 query \
 
 ---
 
-## Cara Kerja
+## How It Works
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                     docker compose up                       │
 │                                                             │
-│  1. Build custom image (plugin di-bake ke /var/lib/...)     │
+│  1. Build custom image (bake plugins to /var/lib/...)       │
 │  2. Start influxdb container                                │
-│  3. InfluxDB boot & healthcheck pass                        │
-│  4. influxdb-init sidecar mulai                             │
-│     ├── Tunggu API ready (retry 5s, max 2 menit)            │
+│  3. InfluxDB boot & healthcheck passes                      │
+│  4. influxdb-init sidecar starts                            │
+│     ├── Wait for API to be ready (retry 5s, max 2 mins)     │
 │     ├── Upsert trigger raw_to_minutes                       │
 │     ├── Upsert trigger minutes_to_hourly                    │
-│     ├── Verifikasi trigger aktif                            │
+│     ├── Verify active triggers                              │
 │     └── Exit 0 ✅                                           │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-### Mengapa sidecar, bukan entrypoint wrapper?
+### Why use a sidecar instead of an entrypoint wrapper?
 
-- **Separation of Concerns** — InfluxDB container tetap "bersih"
-- **Idempoten** — Installer bisa dijalankan ulang tanpa efek samping
-- **Restart behavior** — `restart: on-failure` hanya restart jika error, tidak jika sudah sukses
-- **Debugging mudah** — Log installer terpisah dari log InfluxDB
+- **Separation of Concerns** — Keeps the InfluxDB container "clean"
+- **Idempotency** — The installer can be run multiple times without side effects
+- **Restart behavior** — `restart: on-failure` only restarts if there is an error, not upon success
+- **Easy debugging** — Installer logs are separated from InfluxDB database logs
 
 ---
 
 ## Static Token
 
-Token admin dikonfigurasi via file JSON (bukan env variable langsung) untuk keamanan:
+The admin token is configured using a JSON file (rather than directly via environment variables) for security:
 
 ```json
 // config/admin-token.json
 {
   "name": "static-admin-token",
-  "token": "apiv3_xxxx...",
+  "token": "apiv3_Z71qWXoxUl-xXBxD4RHHrn2GNn9dH_l0bel5G7Vqmm6Z-JupQskVsMeGKPeehc_sQpTJwGTgtpFZRF6E3hNrqA",
   "expiry": null
 }
 ```
 
-Didaftarkan ke InfluxDB via:
+Registered to InfluxDB via:
 ```yaml
 environment:
   - INFLUXDB3_ADMIN_TOKEN_FILE=/etc/influxdb3/admin-token.json
 ```
 
-**Keunggulan pendekatan file vs env variable:**
-- Token tidak muncul di `docker inspect` atau process list
-- Lebih mudah di-rotate (update file, restart container)
-- Compatible dengan Docker Secrets di Swarm mode
+**Benefits of the file approach vs environment variables:**
+- Token does not appear in `docker inspect` or process list commands
+- Easier to rotate (update the file and restart the container)
+- Compatible with Docker Secrets in Swarm mode
 
 ---
 
 ## Data Persistence
 
-Data **tidak akan hilang** saat image di-rebuild karena disimpan di Docker named volume:
+Data **will not be lost** when the image is rebuilt since it is stored in a Docker named volume:
 
 ```yaml
 volumes:
-  - influxdb_data:/var/lib/influxdb3  # ← data aman di sini
+  - influxdb_data:/var/lib/influxdb3  # ← data is secure here
 ```
 
-**Untuk backup:**
+**To create a backup:**
 ```bash
 docker run --rm \
   -v influxdb3-plugins_influxdb_data:/data \
@@ -138,11 +138,11 @@ docker run --rm \
 
 ---
 
-## Menambah Plugin Baru
+## Adding a New Plugin
 
-1. Tambah file `.py` ke folder `plugins/`
-2. Tambah baris `upsert_trigger` di `init/install_plugins.sh`
-3. Rebuild image & restart:
+1. Add the `.py` file to the `plugins/` folder
+2. Add an `upsert_trigger` line in `init/install_plugins.sh`
+3. Rebuild the image & restart:
    ```bash
    docker compose up -d --build
    ```
@@ -151,9 +151,10 @@ docker run --rm \
 
 ## Troubleshooting
 
-| Masalah | Solusi |
-|---------|--------|
-| `influxdb-init` terus restart | Cek `docker compose logs influxdb-init` — kemungkinan token salah |
-| Plugin tidak terpasang | Pastikan file `.py` ada di `plugins/` sebelum build |
-| Data hilang | Jangan hapus volume `influxdb_data` |
-| Port 8086 conflict | Ubah `INFLUXDB_PORT` di `.env` |
+| Issue | Solution |
+|-------|----------|
+| `influxdb-init` keeps restarting | Check `docker compose logs influxdb-init` — the token is likely incorrect |
+| Plugins are not installed | Ensure the `.py` file is present in `plugins/` before building |
+| Data is missing | Do not delete the `influxdb_data` volume |
+| Port 8086 conflict | Change the `INFLUXDB_PORT` in your `.env` file |
+
