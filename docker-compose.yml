@@ -1,0 +1,111 @@
+version: '3.8'
+
+# =============================================================================
+# Manufacturing Energy Monitoring Stack — InfluxDB 3 Custom Image Edition
+# =============================================================================
+# Perubahan dari versi sebelumnya:
+#   - influxdb: image → build (custom image dengan plugin ter-bake)
+#   - influxdb-init: service baru (sidecar) untuk auto-register triggers
+#
+# Services:
+#   influxdb      — InfluxDB 3 Core (custom image)
+#   influxdb-init — Sidecar: register plugin triggers setelah DB ready
+# =============================================================================
+
+volumes:
+  # Data time-series InfluxDB — JANGAN hapus volume ini!
+  # Data tetap aman saat image di-rebuild atau container di-restart.
+  influxdb_data:
+
+services:
+
+  # ============================================================
+  # InfluxDB 3 Core — Custom Image (Plugin Baked-In)
+  # Role  : Primary time-series database
+  # Port  : 8086 (host) → 8181 (container)
+  # UI    : http://localhost:8086
+  # ============================================================
+  influxdb:
+    # Build dari Dockerfile lokal (bukan pull dari Docker Hub)
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    # Tag image yang dihasilkan (berguna untuk versioning)
+    image: influxdb3-custom:latest
+
+    container_name: influxdb3
+
+    ports:
+      - "${INFLUXDB_PORT:-8086}:8181"
+
+    environment:
+      # Identifier node — berguna untuk log dan debugging multi-instance
+      - INFLUXDB3_NODE_IDENTIFIER_PREFIX=${NODE_ID:-local}
+
+      # Path ke file JSON yang berisi static admin token.
+      # Pendekatan file lebih aman dari env variable karena tidak
+      # muncul di 'docker inspect' atau process list.
+      - INFLUXDB3_ADMIN_TOKEN_FILE=/etc/influxdb3/admin-token.json
+
+    volumes:
+      # Data persistence — WAJIB agar data tidak hilang saat rebuild
+      - influxdb_data:/var/lib/influxdb3
+
+      # Mount token file sebagai read-only (keamanan: :ro)
+      - ./config/admin-token.json:/etc/influxdb3/admin-token.json:ro
+
+    restart: unless-stopped
+
+    healthcheck:
+      # Cek endpoint /health — tersedia sejak InfluxDB 3 siap menerima query
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8181/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 30s   # Beri waktu 30s untuk initial boot sebelum mulai cek
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "100m"
+        max-file: "5"
+
+  # ============================================================
+  # InfluxDB Init — Sidecar untuk Auto-Register Plugin Triggers
+  # Role  : Jalankan install_plugins.sh setelah influxdb healthy
+  # Ini bukan service long-running — akan exit 0 setelah selesai
+  # ============================================================
+  influxdb-init:
+    # Gunakan image yang sama dengan InfluxDB (sudah ada influxdb3 CLI)
+    image: influxdb3-custom:latest
+
+    container_name: influxdb3-init
+
+    # Override entrypoint ke shell script installer
+    entrypoint: ["/bin/bash", "/opt/influxdb-init/install_plugins.sh"]
+
+    environment:
+      # Token admin untuk memanggil influxdb3 CLI
+      - INFLUX_TOKEN=${INFLUX_TOKEN:-apiv3_Z71qWXoxUl-xXBxD4RHHrn2GNn9dH_l0bel5G7Vqmm6Z-JupQskVsMeGKPeehc_sQpTJwGTgtpFZRF6E3hNrqA}
+
+      # Alamat InfluxDB (gunakan nama service Docker, bukan localhost)
+      - INFLUX_HOST=http://influxdb:8181
+
+      # Timeout maksimal menunggu InfluxDB siap (detik)
+      - MAX_WAIT_SECONDS=120
+
+    depends_on:
+      influxdb:
+        # Tunggu sampai InfluxDB healthcheck PASS baru jalankan installer
+        condition: service_healthy
+
+    # on-failure: restart jika installer exit dengan kode error
+    # Jika sudah sukses (exit 0), tidak akan restart lagi
+    restart: on-failure
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

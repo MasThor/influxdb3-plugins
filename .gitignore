@@ -1,0 +1,18 @@
+# InfluxDB 3 Custom Image — .gitignore
+# =============================================================================
+
+# Environment variables (berisi token/secret — JANGAN di-commit)
+.env
+
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+
+# macOS
+.DS_Store
+
+# Docker build cache
+.dockerignore
