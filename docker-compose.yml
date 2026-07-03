@@ -39,6 +39,14 @@ services:
     ports:
       - "${INFLUXDB_PORT:-8086}:8181"
 
+    # Wajib: Paksa InfluxDB 3 menggunakan object store berbasis file dan simpan data ke /var/lib/influxdb3
+    # Jika tidak diset, data mungkin tersimpan di memori atau folder sementara container (~/.influxdb)
+    command:
+      - influxdb3
+      - serve
+      - --object-store=file
+      - --data-dir=/var/lib/influxdb3
+
     environment:
       # Identifier node — berguna untuk log dan debugging multi-instance
       - INFLUXDB3_NODE_IDENTIFIER_PREFIX=${NODE_ID:-local}
@@ -47,6 +55,9 @@ services:
       # Pendekatan file lebih aman dari env variable karena tidak
       # muncul di 'docker inspect' atau process list.
       - INFLUXDB3_ADMIN_TOKEN_FILE=/etc/influxdb3/admin-token.json
+
+      # Direktori tempat plugin Python diletakkan (di luar volume agar tidak ter-masking)
+      - INFLUXDB3_PLUGIN_DIR=/plugins
 
     volumes:
       # Data persistence — WAJIB agar data tidak hilang saat rebuild
@@ -58,12 +69,13 @@ services:
     restart: unless-stopped
 
     healthcheck:
-      # Cek endpoint /health — tersedia sejak InfluxDB 3 siap menerima query
-      test: ["CMD-SHELL", "wget -q --spider http://localhost:8181/health || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 15
-      start_period: 30s   # Beri waktu 30s untuk initial boot sebelum mulai cek
+      # Perform authenticated healthcheck by reading the token from /etc/influxdb3/admin-token.json
+      # and sending it in the Authorization: Bearer header.
+      test: [ "CMD-SHELL", "python3 -c \"import urllib.request, json; token=json.load(open('/etc/influxdb3/admin-token.json'))['token']; req=urllib.request.Request('http://localhost:8181/health'); req.add_header('Authorization', 'Bearer ' + token); urllib.request.urlopen(req)\" || exit 1" ]
+      interval: 3s
+      timeout: 2s
+      retries: 10
+      start_period: 5s # Check after 5s instead of 30s to avoid terminal feeling "stuck"
 
     logging:
       driver: json-file
@@ -77,20 +89,24 @@ services:
   # Ini bukan service long-running — akan exit 0 setelah selesai
   # ============================================================
   influxdb-init:
-    # Gunakan image yang sama dengan InfluxDB (sudah ada influxdb3 CLI)
+    # Build configuration to inform Docker Compose that this image is built locally.
+    # It avoids Docker attempting to pull 'influxdb3-custom:latest' from Docker Hub.
+    build:
+      context: .
+      dockerfile: Dockerfile
     image: influxdb3-custom:latest
 
     container_name: influxdb3-init
 
     # Override entrypoint ke shell script installer
-    entrypoint: ["/bin/bash", "/opt/influxdb-init/install_plugins.sh"]
+    entrypoint: [ "/bin/bash", "/opt/influxdb-init/install_plugins.sh" ]
 
     environment:
       # Token admin untuk memanggil influxdb3 CLI
       - INFLUX_TOKEN=${INFLUX_TOKEN:-apiv3_Z71qWXoxUl-xXBxD4RHHrn2GNn9dH_l0bel5G7Vqmm6Z-JupQskVsMeGKPeehc_sQpTJwGTgtpFZRF6E3hNrqA}
 
       # Alamat InfluxDB (gunakan nama service Docker, bukan localhost)
-      - INFLUX_HOST=http://influxdb:8181
+      - INFLUX_HOST=http://influxdb3:8181
 
       # Timeout maksimal menunggu InfluxDB siap (detik)
       - MAX_WAIT_SECONDS=120
@@ -109,3 +125,24 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+
+  # ============================================================
+  # InfluxDB UI — Stand-Alone Explorer UI for InfluxDB v3 Core
+  # Role  : Visualization and query console for InfluxDB v3 Core
+  # UI    : http://localhost:8888
+  # ============================================================
+  influxdb-ui-test:
+    image: influxdata/influxdb3-ui:1.8.0
+    container_name: influxdb3-explorer-tes
+    pull_policy: always
+    command: [ "--mode=admin" ]
+    ports:
+      - "8888:8080"
+    volumes:
+      - ./influx-ui/config:/app-root/config
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "5"

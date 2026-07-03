@@ -23,9 +23,9 @@ set -euo pipefail
 # =============================================================================
 # KONFIGURASI — Semua value bisa di-override via environment variable
 # =============================================================================
-INFLUX_HOST="${INFLUX_HOST:-http://influxdb:8181}"
+INFLUX_HOST="${INFLUX_HOST:-http://influxdb3:8181}"
 TOKEN="${INFLUX_TOKEN:-}"
-PLUGIN_DIR="${PLUGIN_DIR:-/var/lib/influxdb3/plugins}"
+PLUGIN_DIR="${PLUGIN_DIR:-/plugins}"
 
 # Retry configuration untuk menunggu InfluxDB ready
 MAX_WAIT_SECONDS="${MAX_WAIT_SECONDS:-120}"   # Maksimal tunggu 2 menit
@@ -77,7 +77,10 @@ wait_for_influxdb() {
     local http_code
     http_code=$(curl -sf -o /dev/null -w "%{http_code}" \
       --max-time 3 \
+      -H "Authorization: Bearer ${TOKEN}" \
       "${INFLUX_HOST}/health" 2>/dev/null || echo "000")
+      # "http://localhost:8181/health" 2>/dev/null || echo "000")
+
 
     if [ "${http_code}" = "200" ]; then
       log_success "InfluxDB API siap! (${elapsed}s)"
@@ -97,6 +100,35 @@ wait_for_influxdb() {
 
 wait_for_influxdb
 
+# Global error counter
+INSTALL_ERRORS=0
+
+# =============================================================================
+# STEP 2b: Cek & Buat Database
+# InfluxDB 3 memerlukan database target sudah ada sebelum trigger dibuat
+# =============================================================================
+check_and_create_database() {
+  local db_name="$1"
+  log_info "Mengecek ketersediaan database: ${db_name} ..."
+
+  local out
+  out=$(influxdb3 create database --host "${INFLUX_HOST}" --token "${TOKEN}" "${db_name}" 2>&1 || true)
+
+  if echo "${out}" | grep -qi "already exists\|conflict"; then
+    log_success "  Database '${db_name}' sudah ada."
+  elif echo "${out}" | grep -qi "success\|created"; then
+    log_success "  Database '${db_name}' berhasil dibuat."
+  else
+    log_info "  Pembuatan database '${db_name}' mengembalikan: ${out}"
+  fi
+}
+
+echo ""
+echo "───────────────────────────────────────────────────────────"
+check_and_create_database "energy_monitoring"
+check_and_create_database "energy_minutes"
+check_and_create_database "energy_hour"
+
 # =============================================================================
 # STEP 3: Fungsi upsert_trigger (delete → create → verify)
 #
@@ -109,7 +141,6 @@ wait_for_influxdb
 #
 # Return: 0 jika sukses, 1 jika gagal
 # =============================================================================
-INSTALL_ERRORS=0  # counter untuk tracking error keseluruhan
 
 upsert_trigger() {
   local trig_name="$1"

@@ -9,11 +9,15 @@ Custom Docker image based on `influxdb:3.10-core` with Processing Engine plugins
 ```
 influxdb3-plugins/
 ├── Dockerfile                          ← Build custom image
-├── docker-compose.yml                  ← Orchestration: InfluxDB + Init sidecar
+├── docker-compose.yml                  ← Orchestration: InfluxDB + Init sidecar + UI Explorer
 ├── .env.example                        ← Environment variables template
 │
 ├── config/
 │   └── admin-token.json               ← Static admin token (mounted :ro)
+│
+├── influx-ui/
+│   └── config/
+│       └── config.json                ← InfluxDB 3 UI connection configuration
 │
 ├── init/
 │   └── install_plugins.sh             ← Sidecar: auto-register plugin triggers
@@ -22,6 +26,14 @@ influxdb3-plugins/
     ├── downsampler_raw_to_minutes.py  ← Plugin: RAW (10s) → MINUTES (1m)
     └── downsampler_minutes_to_hourly.py ← Plugin: MINUTES (1m) → HOURLY (1h)
 ```
+
+---
+
+## services
+
+The following ports are exposed:
+- **InfluxDB 3 Core**: `http://localhost:8086`
+- **InfluxDB 3 Explorer UI**: `http://localhost:8888`
 
 ---
 
@@ -146,6 +158,41 @@ docker run --rm \
    ```bash
    docker compose up -d --build
    ```
+
+---
+
+## Publishing to a Docker Registry
+
+Jika Anda ingin mengunggah (upload) custom image ini ke registry seperti **Docker Hub**, **GitHub Container Registry (GHCR)**, atau **AWS ECR** agar bisa digunakan di server production tanpa perlu membawa file `.py` dan `Dockerfile` lagi, ikuti langkah ini:
+
+### 1. Build & Tag Image
+Ganti `username` dengan nama akun Docker Hub/Registry Anda:
+```bash
+docker build -t username/influxdb3-custom:1.0.0 .
+```
+
+### 2. Login ke Registry & Push
+```bash
+docker login
+docker push username/influxdb3-custom:1.0.0
+```
+
+### 3. Update docker-compose.yml di Server Production
+Di server production, Anda tidak perlu lagi melakukan `build`. Cukup ubah `docker-compose.yml` menjadi:
+```yaml
+  influxdb:
+    image: username/influxdb3-custom:1.0.0
+    container_name: influxdb3
+    # Hapus bagian 'build:'
+    ...
+
+  influxdb-init:
+    image: username/influxdb3-custom:1.0.0
+    container_name: influxdb3-init
+    # Hapus bagian 'build:'
+    ...
+```
+Dengan begitu, Docker Compose hanya akan melakukan *pull* dari registry dan tidak memerlukan file `Dockerfile` maupun source code plugin saat di-deploy.
 
 ---
 
